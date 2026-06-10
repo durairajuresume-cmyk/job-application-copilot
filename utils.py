@@ -87,6 +87,25 @@ def rewrite_resume(client: anthropic.Anthropic, resume_text: str, job_descriptio
     return json.loads(json_match.group())
 
 
+def _safe(text: str) -> str:
+    """Map common Unicode chars to Latin-1 equivalents for fpdf2 core fonts."""
+    if not text:
+        return ""
+    text = text.translate(str.maketrans({
+        '–': '-',    # en dash
+        '—': '-',    # em dash
+        '‘': "'",    # left single quote
+        '’': "'",    # right single quote / apostrophe
+        '“': '"',    # left double quote
+        '”': '"',    # right double quote
+        '•': '-',    # bullet
+        '…': '...',  # ellipsis
+        ' ': ' ',    # non-breaking space
+        '­': '',     # soft hyphen
+    }))
+    return text.encode('latin-1', errors='replace').decode('latin-1')
+
+
 def generate_resume_pdf(data: dict) -> bytes:
     """Render structured resume data as a clean ATS-friendly PDF and return bytes."""
 
@@ -99,7 +118,7 @@ def generate_resume_pdf(data: dict) -> bytes:
     def _section_heading(pdf: FPDF, title: str):
         pdf.set_font("Helvetica", "B", 11)
         pdf.set_text_color(30, 30, 30)
-        pdf.cell(0, 7, title.upper(), ln=True)
+        pdf.cell(0, 7, _safe(title.upper()), ln=True)
         pdf.set_draw_color(180, 180, 180)
         pdf.set_line_width(0.3)
         pdf.line(pdf.get_x(), pdf.get_y(), pdf.get_x() + 170, pdf.get_y())
@@ -113,12 +132,12 @@ def generate_resume_pdf(data: dict) -> bytes:
     # Name
     pdf.set_font("Helvetica", "B", 20)
     pdf.set_text_color(15, 15, 15)
-    pdf.cell(0, 10, data.get("name", ""), ln=True, align="C")
+    pdf.cell(0, 10, _safe(data.get("name", "")), ln=True, align="C")
 
     # Contact
     pdf.set_font("Helvetica", "", 9)
     pdf.set_text_color(80, 80, 80)
-    pdf.cell(0, 5, data.get("contact", ""), ln=True, align="C")
+    pdf.cell(0, 5, _safe(data.get("contact", "")), ln=True, align="C")
     pdf.ln(5)
 
     # Summary
@@ -126,7 +145,7 @@ def generate_resume_pdf(data: dict) -> bytes:
         _section_heading(pdf, "Professional Summary")
         pdf.set_font("Helvetica", "", 10)
         pdf.set_text_color(40, 40, 40)
-        pdf.multi_cell(0, 5, data["summary"])
+        pdf.multi_cell(0, 5, _safe(data["summary"]))
         pdf.ln(4)
 
     # Experience
@@ -138,18 +157,18 @@ def generate_resume_pdf(data: dict) -> bytes:
             title_line = exp.get("title", "")
             company = exp.get("company", "")
             if company:
-                title_line += f"  —  {company}"
-            pdf.cell(0, 6, title_line, ln=True)
+                title_line += f"  -  {company}"
+            pdf.cell(0, 6, _safe(title_line), ln=True)
 
             pdf.set_font("Helvetica", "I", 9)
             pdf.set_text_color(100, 100, 100)
-            pdf.cell(0, 4, exp.get("duration", ""), ln=True)
+            pdf.cell(0, 4, _safe(exp.get("duration", "")), ln=True)
 
             pdf.set_font("Helvetica", "", 10)
             pdf.set_text_color(40, 40, 40)
             for bullet in exp.get("bullets", []):
-                pdf.cell(5, 5, "•", ln=False)
-                pdf.multi_cell(0, 5, bullet)
+                pdf.cell(5, 5, "-", ln=False)
+                pdf.multi_cell(0, 5, _safe(bullet))
             pdf.ln(3)
 
     # Skills
@@ -157,7 +176,7 @@ def generate_resume_pdf(data: dict) -> bytes:
         _section_heading(pdf, "Skills")
         pdf.set_font("Helvetica", "", 10)
         pdf.set_text_color(40, 40, 40)
-        pdf.multi_cell(0, 5, "  •  ".join(data["skills"]))
+        pdf.multi_cell(0, 5, "  -  ".join(_safe(s) for s in data["skills"]))
         pdf.ln(4)
 
     # Education
@@ -166,11 +185,11 @@ def generate_resume_pdf(data: dict) -> bytes:
         for edu in data["education"]:
             pdf.set_font("Helvetica", "B", 10)
             pdf.set_text_color(20, 20, 20)
-            pdf.cell(0, 6, edu.get("degree", ""), ln=True)
+            pdf.cell(0, 6, _safe(edu.get("degree", "")), ln=True)
             pdf.set_font("Helvetica", "", 10)
             pdf.set_text_color(60, 60, 60)
-            inst = edu.get("institution", "")
-            year = edu.get("year", "")
+            inst = _safe(edu.get("institution", ""))
+            year = _safe(edu.get("year", ""))
             pdf.cell(0, 5, f"{inst}  {year}".strip(), ln=True)
             pdf.ln(2)
 
