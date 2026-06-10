@@ -5,6 +5,7 @@ import streamlit as st
 from dotenv import load_dotenv
 
 from utils import (
+    analyze_pdf_format,
     analyze_resume,
     extract_text_from_pdf,
     generate_cover_letter,
@@ -164,6 +165,7 @@ if analyze_clicked:
     try:
         status.write("Extracting text from PDF…")
         resume_text = extract_text_from_pdf(uploaded_file)
+        pdf_fmt = analyze_pdf_format(uploaded_file)  # seek(0) is inside the function
         if not resume_text:
             status.update(label="Extraction failed", state="error")
             st.error(
@@ -190,6 +192,7 @@ if analyze_clicked:
         st.session_state["cover_letter"] = cover_letter
         st.session_state["interview_prep"] = interview_prep
         st.session_state["rewritten"] = rewritten
+        st.session_state["pdf_fmt"] = pdf_fmt
         st.session_state["has_results"] = True
 
     except anthropic.AuthenticationError:
@@ -341,7 +344,7 @@ if st.session_state.get("has_results"):
 
         with col_info:
             st.markdown("**Download**")
-            pdf_bytes = generate_resume_pdf(rewritten)
+            pdf_bytes = generate_resume_pdf(rewritten, st.session_state.get("pdf_fmt"))
             st.download_button(
                 label="Download PDF",
                 data=pdf_bytes,
