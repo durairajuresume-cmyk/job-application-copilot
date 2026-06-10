@@ -13,7 +13,7 @@ from utils import (
 
 # ── Page config (must be first Streamlit call) ──────────────────────────────
 st.set_page_config(
-    page_title="Job Application Copilot",
+    page_title="Durai's Job Application Copilot",
     page_icon="assets/icon.png" if os.path.exists("assets/icon.png") else "💼",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -117,7 +117,7 @@ The app calls Claude to produce:
 st.markdown(
     """
 <div class="app-header">
-  <h1>Job Application Copilot</h1>
+  <h1>Durai's Job Application Copilot</h1>
   <p>AI-powered resume analysis, cover letters, and interview coaching</p>
 </div>
 """,
