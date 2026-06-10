@@ -2,6 +2,7 @@ import os
 
 import anthropic
 import streamlit as st
+from dotenv import load_dotenv
 
 from utils import (
     analyze_resume,
@@ -18,6 +19,22 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+# ── API key resolution: st.secrets → .env → error ───────────────────────────
+load_dotenv()
+try:
+    api_key = st.secrets["ANTHROPIC_API_KEY"]
+except (KeyError, FileNotFoundError):
+    api_key = os.getenv("ANTHROPIC_API_KEY")
+
+if not api_key:
+    st.error(
+        "ANTHROPIC_API_KEY not found. "
+        "Add it to `.streamlit/secrets.toml` or a `.env` file and restart the app."
+    )
+    st.stop()
+
+client = anthropic.Anthropic(api_key=api_key)
+
 # ── CSS ─────────────────────────────────────────────────────────────────────
 st.markdown(
     """
@@ -26,7 +43,6 @@ st.markdown(
 [data-testid="stAppViewContainer"] { background: #f8fafc; }
 [data-testid="stSidebar"] { background: #1e293b; }
 [data-testid="stSidebar"] * { color: #e2e8f0 !important; }
-[data-testid="stSidebar"] input { color: #0f172a !important; }
 
 /* ---- header ---- */
 .app-header { text-align: center; padding: 1.5rem 0 0.5rem; }
@@ -80,24 +96,12 @@ hr { border-color: #e2e8f0; }
 
 # ── Sidebar ──────────────────────────────────────────────────────────────────
 with st.sidebar:
-    st.markdown("## Configuration")
-    api_key = st.text_input(
-        "Anthropic API Key",
-        type="password",
-        placeholder="sk-ant-...",
-        help="Your key is used only for this session and never stored.",
-    )
-    if api_key:
-        st.success("API key set")
-
-    st.markdown("---")
-    st.markdown("### How it works")
+    st.markdown("## How it works")
     st.markdown(
         """
-1. Enter your Anthropic API key
-2. Upload your resume (PDF)
-3. Paste the job description
-4. Click **Analyze**
+1. Upload your resume (PDF)
+2. Paste the job description
+3. Click **Analyze**
 
 The app calls Claude to produce:
 - A **match score** with rationale
@@ -153,45 +157,40 @@ analyze_clicked = st.button(
 
 # ── Analysis logic ───────────────────────────────────────────────────────────
 if analyze_clicked:
-    if not api_key:
-        st.error("Please enter your Anthropic API key in the sidebar.")
-    else:
-        client = anthropic.Anthropic(api_key=api_key)
+    status = st.status("Running analysis…", expanded=True)
+    try:
+        status.write("Extracting text from PDF…")
+        resume_text = extract_text_from_pdf(uploaded_file)
+        if not resume_text:
+            status.update(label="Extraction failed", state="error")
+            st.error(
+                "Could not extract text from this PDF. "
+                "Please ensure it is not a scanned image or a locked document."
+            )
+            st.stop()
 
-        status = st.status("Running analysis…", expanded=True)
-        try:
-            status.write("Extracting text from PDF…")
-            resume_text = extract_text_from_pdf(uploaded_file)
-            if not resume_text:
-                status.update(label="Extraction failed", state="error")
-                st.error(
-                    "Could not extract text from this PDF. "
-                    "Please ensure it is not a scanned image or a locked document."
-                )
-                st.stop()
+        status.write("Analyzing resume against the job description…")
+        analysis = analyze_resume(client, resume_text, job_description)
 
-            status.write("Analyzing resume against the job description…")
-            analysis = analyze_resume(client, resume_text, job_description)
+        status.write("Writing tailored cover letter…")
+        cover_letter = generate_cover_letter(client, resume_text, job_description)
 
-            status.write("Writing tailored cover letter…")
-            cover_letter = generate_cover_letter(client, resume_text, job_description)
+        status.write("Building interview preparation guide…")
+        interview_prep = generate_interview_prep(client, resume_text, job_description)
 
-            status.write("Building interview preparation guide…")
-            interview_prep = generate_interview_prep(client, resume_text, job_description)
+        status.update(label="Analysis complete!", state="complete", expanded=False)
 
-            status.update(label="Analysis complete!", state="complete", expanded=False)
+        st.session_state["analysis"] = analysis
+        st.session_state["cover_letter"] = cover_letter
+        st.session_state["interview_prep"] = interview_prep
+        st.session_state["has_results"] = True
 
-            st.session_state["analysis"] = analysis
-            st.session_state["cover_letter"] = cover_letter
-            st.session_state["interview_prep"] = interview_prep
-            st.session_state["has_results"] = True
-
-        except anthropic.AuthenticationError:
-            status.update(label="Authentication failed", state="error")
-            st.error("Invalid API key. Please check your Anthropic API key and try again.")
-        except Exception as exc:
-            status.update(label="Error", state="error")
-            st.error(f"Something went wrong: {exc}")
+    except anthropic.AuthenticationError:
+        status.update(label="Authentication failed", state="error")
+        st.error("Invalid API key. Please check your Anthropic API key and try again.")
+    except Exception as exc:
+        status.update(label="Error", state="error")
+        st.error(f"Something went wrong: {exc}")
 
 # ── Results ──────────────────────────────────────────────────────────────────
 if st.session_state.get("has_results"):
