@@ -110,6 +110,7 @@ The app calls Claude to produce:
 - **Strengths**, **gaps**, and **resume improvements**
 - A **tailored cover letter**
 - **Interview prep** with STAR answers
+- A **rewritten resume** tailored to the role (PDF download)
 """
     )
     st.markdown("---")
