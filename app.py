@@ -74,7 +74,33 @@ st.markdown(
 .section-title { font-size:1.1rem; font-weight:700; color:#1e293b; margin:1.2rem 0 0.6rem; }
 
 /* ---- tabs ---- */
-[data-baseweb="tab"] { font-size:1rem; font-weight:600; }
+[data-baseweb="tab-list"] {
+    gap: 6px;
+    background: #f1f5f9;
+    border-radius: 12px;
+    padding: 5px 6px;
+}
+[data-baseweb="tab"] {
+    border-radius: 8px;
+    padding: 0.45rem 1.1rem !important;
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: #64748b !important;
+    background: transparent;
+    border: none !important;
+}
+[data-baseweb="tab"]:hover {
+    background: #e2e8f0 !important;
+    color: #1e293b !important;
+}
+[aria-selected="true"][data-baseweb="tab"] {
+    background: linear-gradient(135deg, #6366f1, #8b5cf6) !important;
+    color: #ffffff !important;
+    border-radius: 8px;
+}
+/* hide the default active-tab underline */
+[data-baseweb="tab-highlight"] { display: none; }
+[data-baseweb="tab-border"]    { display: none; }
 
 /* ---- primary button ---- */
 [data-testid="stButton"] > button[kind="primary"] {
