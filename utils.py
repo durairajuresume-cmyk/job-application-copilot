@@ -178,19 +178,25 @@ def generate_resume_pdf(data: dict, fmt: dict | None = None) -> bytes:
     cont_sz = max(7, min(int(fmt.get("contact_size", 9)), 12))
     head_rgb = fmt.get("heading_rgb") or (30, 30, 30)
 
+    # A4 page (210mm), margins left=20 top=18 right=20 → content width = 170mm.
+    # Use explicit widths everywhere — w=0 in multi_cell is unreliable in newer
+    # fpdf2 when the cursor has been moved right by a preceding cell() call.
+    FULL_W = 170
+    INDENT = 6          # dash cell width before each bullet
+    BULL_W = FULL_W - INDENT
+    line_h = max(5, int(body_sz * 0.5))
+
     class _PDF(FPDF):
-        def header(self):
-            pass
-        def footer(self):
-            pass
+        def header(self): pass
+        def footer(self): pass
 
     def _section_heading(pdf: FPDF, title: str):
         pdf.set_font("Helvetica", "B", head_sz)
         pdf.set_text_color(*head_rgb)
-        pdf.cell(0, 7, _safe(title.upper()), ln=True)
+        pdf.cell(FULL_W, 7, _safe(title.upper()), ln=True)
         pdf.set_draw_color(*head_rgb)
         pdf.set_line_width(0.3)
-        pdf.line(pdf.get_x(), pdf.get_y(), pdf.get_x() + 170, pdf.get_y())
+        pdf.line(pdf.get_x(), pdf.get_y(), pdf.get_x() + FULL_W, pdf.get_y())
         pdf.set_text_color(40, 40, 40)
         pdf.ln(2)
 
@@ -202,12 +208,12 @@ def generate_resume_pdf(data: dict, fmt: dict | None = None) -> bytes:
     # Name
     pdf.set_font("Helvetica", "B", name_sz)
     pdf.set_text_color(15, 15, 15)
-    pdf.cell(0, 10, _safe(data.get("name", "")), ln=True, align="C")
+    pdf.cell(FULL_W, 10, _safe(data.get("name", "")), ln=True, align="C")
 
     # Contact
     pdf.set_font("Helvetica", "", cont_sz)
     pdf.set_text_color(80, 80, 80)
-    pdf.cell(0, 5, _safe(data.get("contact", "")), ln=True, align="C")
+    pdf.cell(FULL_W, 5, _safe(data.get("contact", "")), ln=True, align="C")
     pdf.ln(5)
 
     # Summary
@@ -215,7 +221,7 @@ def generate_resume_pdf(data: dict, fmt: dict | None = None) -> bytes:
         _section_heading(pdf, "Professional Summary")
         pdf.set_font("Helvetica", "", body_sz)
         pdf.set_text_color(40, 40, 40)
-        pdf.multi_cell(0, 5, _safe(data["summary"]))
+        pdf.multi_cell(FULL_W, line_h, _safe(data["summary"]))
         pdf.ln(4)
 
     # Experience
@@ -228,17 +234,20 @@ def generate_resume_pdf(data: dict, fmt: dict | None = None) -> bytes:
             company = exp.get("company", "")
             if company:
                 title_line += f"  -  {company}"
-            pdf.cell(0, 6, _safe(title_line), ln=True)
+            pdf.cell(FULL_W, line_h + 1, _safe(title_line), ln=True)
 
             pdf.set_font("Helvetica", "I", cont_sz)
             pdf.set_text_color(100, 100, 100)
-            pdf.cell(0, 4, _safe(exp.get("duration", "")), ln=True)
+            pdf.cell(FULL_W, line_h, _safe(exp.get("duration", "")), ln=True)
 
             pdf.set_font("Helvetica", "", body_sz)
             pdf.set_text_color(40, 40, 40)
             for bullet in exp.get("bullets", []):
-                pdf.cell(5, 5, "-", ln=False)
-                pdf.multi_cell(0, 5, _safe(bullet))
+                text = _safe(bullet.strip())
+                if not text:
+                    continue
+                pdf.cell(INDENT, line_h, "-", ln=False)
+                pdf.multi_cell(BULL_W, line_h, text)
             pdf.ln(3)
 
     # Skills
@@ -246,7 +255,8 @@ def generate_resume_pdf(data: dict, fmt: dict | None = None) -> bytes:
         _section_heading(pdf, "Skills")
         pdf.set_font("Helvetica", "", body_sz)
         pdf.set_text_color(40, 40, 40)
-        pdf.multi_cell(0, 5, "  -  ".join(_safe(s) for s in data["skills"]))
+        skills_text = "  -  ".join(_safe(s) for s in data["skills"] if s)
+        pdf.multi_cell(FULL_W, line_h, skills_text)
         pdf.ln(4)
 
     # Education
@@ -255,12 +265,12 @@ def generate_resume_pdf(data: dict, fmt: dict | None = None) -> bytes:
         for edu in data["education"]:
             pdf.set_font("Helvetica", "B", body_sz)
             pdf.set_text_color(20, 20, 20)
-            pdf.cell(0, 6, _safe(edu.get("degree", "")), ln=True)
+            pdf.cell(FULL_W, line_h + 1, _safe(edu.get("degree", "")), ln=True)
             pdf.set_font("Helvetica", "", body_sz)
             pdf.set_text_color(60, 60, 60)
             inst = _safe(edu.get("institution", ""))
             year = _safe(edu.get("year", ""))
-            pdf.cell(0, 5, f"{inst}  {year}".strip(), ln=True)
+            pdf.cell(FULL_W, line_h, f"{inst}  {year}".strip(), ln=True)
             pdf.ln(2)
 
     return bytes(pdf.output())
