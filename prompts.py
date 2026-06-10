@@ -57,6 +57,57 @@ Requirements:
 Output only the cover letter text, nothing else."""
 
 
+REWRITER_SYSTEM_PROMPT = """You are an expert resume writer and ATS optimization specialist. \
+You rewrite resumes to maximise relevance for a specific job description — strengthening bullet points, \
+injecting keywords naturally, and sharpening the summary — without fabricating experience or skills \
+the candidate does not have."""
+
+REWRITER_USER_PROMPT = """Rewrite the resume below to be optimally tailored for the job description provided.
+
+RESUME:
+{resume_text}
+
+JOB DESCRIPTION:
+{job_description}
+
+Rules:
+- Only use experience, skills, and achievements that exist in the original resume
+- Strengthen bullet points with strong action verbs and quantified impact where data exists
+- Inject relevant keywords from the job description naturally
+- Rewrite the summary to speak directly to this role
+- Reorder bullet points within each role so the most relevant appear first
+- Do NOT invent metrics, companies, titles, or skills not present in the original
+
+Return ONLY valid JSON in exactly this structure (no markdown, no extra text):
+{{
+  "name": "<full name from resume>",
+  "contact": "<email | phone | location — one line>",
+  "summary": "<rewritten 2–3 sentence professional summary targeted to this role>",
+  "experience": [
+    {{
+      "title": "<job title>",
+      "company": "<company name>",
+      "duration": "<start – end>",
+      "bullets": [
+        "<rewritten bullet>",
+        "<rewritten bullet>"
+      ]
+    }}
+  ],
+  "skills": ["<skill>", "<skill>"],
+  "education": [
+    {{
+      "degree": "<degree name>",
+      "institution": "<institution name>",
+      "year": "<year or duration>"
+    }}
+  ],
+  "changes": [
+    "<concise description of a key change made and why>"
+  ]
+}}"""
+
+
 INTERVIEW_PREP_SYSTEM_PROMPT = """You are an expert interview coach who prepares candidates \
 with targeted, role-specific interview strategies."""
 

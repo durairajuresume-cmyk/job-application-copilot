@@ -9,6 +9,8 @@ from utils import (
     extract_text_from_pdf,
     generate_cover_letter,
     generate_interview_prep,
+    generate_resume_pdf,
+    rewrite_resume,
 )
 
 # ── Page config (must be first Streamlit call) ──────────────────────────────
@@ -178,11 +180,15 @@ if analyze_clicked:
         status.write("Building interview preparation guide…")
         interview_prep = generate_interview_prep(client, resume_text, job_description)
 
+        status.write("Rewriting resume for this role…")
+        rewritten = rewrite_resume(client, resume_text, job_description)
+
         status.update(label="Analysis complete!", state="complete", expanded=False)
 
         st.session_state["analysis"] = analysis
         st.session_state["cover_letter"] = cover_letter
         st.session_state["interview_prep"] = interview_prep
+        st.session_state["rewritten"] = rewritten
         st.session_state["has_results"] = True
 
     except anthropic.AuthenticationError:
@@ -197,6 +203,7 @@ if st.session_state.get("has_results"):
     analysis: dict = st.session_state["analysis"]
     cover_letter: str = st.session_state["cover_letter"]
     interview_prep: str = st.session_state["interview_prep"]
+    rewritten: dict = st.session_state["rewritten"]
 
     score: int = int(analysis.get("match_score", 0))
     rationale: str = analysis.get("score_rationale", "")
@@ -234,8 +241,8 @@ if st.session_state.get("has_results"):
         )
 
     # Tabs
-    tab_analysis, tab_cover, tab_interview = st.tabs(
-        ["Resume Analysis", "Cover Letter", "Interview Prep"]
+    tab_analysis, tab_cover, tab_interview, tab_rewrite = st.tabs(
+        ["Resume Analysis", "Cover Letter", "Interview Prep", "Rewritten Resume"]
     )
 
     # ── Tab 1: Analysis ──────────────────────────────────────────────────
@@ -280,3 +287,86 @@ if st.session_state.get("has_results"):
     with tab_interview:
         st.markdown("#### Interview Preparation Guide")
         st.markdown(interview_prep)
+
+    # ── Tab 4: Rewritten Resume ──────────────────────────────────────────
+    with tab_rewrite:
+        st.markdown("#### Rewritten Resume")
+        st.markdown(
+            "Tailored to this job description. Review carefully — download when ready.",
+            help="Claude rewrote your resume using only your existing experience and skills.",
+        )
+
+        # Changes summary
+        changes = rewritten.get("changes", [])
+        if changes:
+            with st.expander("What was changed", expanded=True):
+                for change in changes:
+                    st.markdown(f"- {change}")
+
+        st.markdown("---")
+
+        # Rendered resume preview
+        col_r, col_info = st.columns([2, 1], gap="large")
+
+        with col_r:
+            st.markdown(f"## {rewritten.get('name', '')}")
+            st.caption(rewritten.get("contact", ""))
+
+            if rewritten.get("summary"):
+                st.markdown("**Professional Summary**")
+                st.markdown(rewritten["summary"])
+
+            if rewritten.get("experience"):
+                st.markdown("**Experience**")
+                for exp in rewritten["experience"]:
+                    st.markdown(
+                        f"**{exp.get('title', '')}** — {exp.get('company', '')}  \n"
+                        f"*{exp.get('duration', '')}*"
+                    )
+                    for bullet in exp.get("bullets", []):
+                        st.markdown(f"- {bullet}")
+
+            if rewritten.get("skills"):
+                st.markdown("**Skills**")
+                st.markdown(" · ".join(rewritten["skills"]))
+
+            if rewritten.get("education"):
+                st.markdown("**Education**")
+                for edu in rewritten["education"]:
+                    st.markdown(
+                        f"**{edu.get('degree', '')}** — "
+                        f"{edu.get('institution', '')} {edu.get('year', '')}"
+                    )
+
+        with col_info:
+            st.markdown("**Download**")
+            pdf_bytes = generate_resume_pdf(rewritten)
+            st.download_button(
+                label="Download PDF",
+                data=pdf_bytes,
+                file_name="rewritten_resume.pdf",
+                mime="application/pdf",
+                use_container_width=True,
+            )
+            txt = "\n\n".join([
+                rewritten.get("name", ""),
+                rewritten.get("contact", ""),
+                "SUMMARY\n" + rewritten.get("summary", ""),
+                "EXPERIENCE\n" + "\n".join(
+                    f"{e.get('title')} — {e.get('company')} ({e.get('duration')})\n" +
+                    "\n".join(f"• {b}" for b in e.get("bullets", []))
+                    for e in rewritten.get("experience", [])
+                ),
+                "SKILLS\n" + " • ".join(rewritten.get("skills", [])),
+                "EDUCATION\n" + "\n".join(
+                    f"{e.get('degree')} — {e.get('institution')} {e.get('year', '')}"
+                    for e in rewritten.get("education", [])
+                ),
+            ])
+            st.download_button(
+                label="Download TXT",
+                data=txt,
+                file_name="rewritten_resume.txt",
+                mime="text/plain",
+                use_container_width=True,
+            )
