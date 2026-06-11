@@ -129,19 +129,23 @@ if not is_logged_in():
 """,
         unsafe_allow_html=True,
     )
-    # Generate OAuth URL eagerly — verifier is stored in the cached Supabase client.
-    oauth_url = get_google_oauth_url(supabase)
+    # Cache the URL so the PKCE verifier isn't regenerated on every rerender.
+    # Re-generating the URL overwrites the verifier in the shared client, which
+    # causes the callback's code-exchange to fail with a mismatch.
+    if "oauth_url" not in st.session_state:
+        st.session_state["oauth_url"] = get_google_oauth_url(supabase)
+    oauth_url = st.session_state["oauth_url"]
+
     _, btn_col, _ = st.columns([1, 2, 1])
     with btn_col:
-        # Render outside Streamlit's React tree so clicks aren't intercepted.
-        # Try window.top first (full tab redirect), fall back to window.parent
-        # (inner-iframe redirect), then plain href as last resort.
+        # Rendered outside Streamlit's React tree so clicks aren't intercepted.
+        # Named target "google-auth" reuses the same tab on repeated clicks.
         components.html(
             f"""
             <script>
             function doLogin() {{
                 try {{ window.top.location.href = "{oauth_url}"; return; }} catch(e) {{}}
-                window.open("{oauth_url}", "_blank");
+                window.open("{oauth_url}", "google-auth");
             }}
             </script>
             <button onclick="doLogin()" style="
@@ -154,6 +158,7 @@ if not is_logged_in():
             """,
             height=56,
         )
+        st.caption("A Google sign-in tab will open — complete the sign-in there.")
     st.stop()
 
 # ── Authenticated — load user info ───────────────────────────────────────────
