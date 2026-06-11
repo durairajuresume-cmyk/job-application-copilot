@@ -273,4 +273,48 @@ def generate_resume_pdf(data: dict, fmt: dict | None = None) -> bytes:
             pdf.cell(FULL_W, line_h, f"{inst}  {year}".strip(), ln=True)
             pdf.ln(2)
 
+    # Projects (optional — rendered if AI includes them)
+    if data.get("projects"):
+        _section_heading(pdf, "Projects")
+        for proj in data["projects"]:
+            pdf.set_font("Helvetica", "B", body_sz)
+            pdf.set_text_color(20, 20, 20)
+            title = _safe(proj.get("title", ""))
+            tech = _safe(proj.get("tech", ""))
+            header = f"{title}  -  {tech}" if tech else title
+            pdf.cell(FULL_W, line_h + 1, header, ln=True)
+            pdf.set_font("Helvetica", "", body_sz)
+            pdf.set_text_color(40, 40, 40)
+            for bullet in proj.get("bullets", []):
+                text = _safe(bullet.strip())
+                if not text:
+                    continue
+                pdf.cell(INDENT, line_h, "-", ln=False)
+                pdf.multi_cell(BULL_W, line_h, text)
+            pdf.ln(3)
+
+    # Certifications (optional)
+    if data.get("certifications"):
+        _section_heading(pdf, "Certifications")
+        pdf.set_font("Helvetica", "", body_sz)
+        pdf.set_text_color(40, 40, 40)
+        for cert in data["certifications"]:
+            text = _safe(str(cert).strip())
+            if text:
+                pdf.cell(INDENT, line_h, "-", ln=False)
+                pdf.multi_cell(BULL_W, line_h, text)
+        pdf.ln(2)
+
+    # Awards (optional)
+    if data.get("awards"):
+        _section_heading(pdf, "Awards & Recognition")
+        pdf.set_font("Helvetica", "", body_sz)
+        pdf.set_text_color(40, 40, 40)
+        for award in data["awards"]:
+            text = _safe(str(award).strip())
+            if text:
+                pdf.cell(INDENT, line_h, "-", ln=False)
+                pdf.multi_cell(BULL_W, line_h, text)
+        pdf.ln(2)
+
     return bytes(pdf.output())

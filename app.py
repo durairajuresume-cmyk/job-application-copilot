@@ -60,9 +60,10 @@ if st.query_params.get("code"):
     handle_oauth_callback(supabase)
     st.rerun()
 
-# Restore session from session_state tokens (survives Streamlit rerenders)
-if not is_logged_in():
-    restore_session(supabase)
+# Restore / refresh session on every render.
+# Always calling this keeps the shared Supabase client's auth state current —
+# the client is cached and shared, so another session can overwrite its state.
+restore_session(supabase)
 
 # ── CSS ──────────────────────────────────────────────────────────────────────
 st.markdown(

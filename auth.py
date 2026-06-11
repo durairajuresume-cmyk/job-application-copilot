@@ -64,9 +64,15 @@ def restore_session(supabase: Client) -> bool:
     try:
         resp = supabase.auth.set_session(access, refresh)
         st.session_state["user"] = resp.user
+        # Persist any refreshed tokens back to session state
+        if resp.session:
+            st.session_state["sb_access_token"] = resp.session.access_token
+            st.session_state["sb_refresh_token"] = resp.session.refresh_token
         return True
     except Exception:
-        _clear_session()
+        # Don't clear session on transient errors (network blip, shared client
+        # state overwritten by another session). Only a deliberate sign-out
+        # should remove the user from session state.
         return False
 
 

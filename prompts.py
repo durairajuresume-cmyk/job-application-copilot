@@ -81,7 +81,7 @@ Rules:
 Return ONLY valid JSON in exactly this structure (no markdown, no extra text):
 {{
   "name": "<full name from resume>",
-  "contact": "<email | phone | location — one line>",
+  "contact": "<email | phone | location | linkedin — one line, NO job title or subtitle>",
   "summary": "<rewritten 2–3 sentence professional summary targeted to this role>",
   "experience": [
     {{
