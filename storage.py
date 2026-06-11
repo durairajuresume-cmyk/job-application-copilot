@@ -32,14 +32,18 @@ def save_resume(
 
 def load_resume_meta(supabase: Client, user_id: str) -> dict | None:
     """Return the saved resume metadata row, or None."""
-    resp = (
-        supabase.table("user_resumes")
-        .select("*")
-        .eq("user_id", user_id)
-        .maybe_single()
-        .execute()
-    )
-    return resp.data
+    try:
+        resp = (
+            supabase.table("user_resumes")
+            .select("*")
+            .eq("user_id", user_id)
+            .limit(1)
+            .execute()
+        )
+        rows = resp.data or []
+        return rows[0] if rows else None
+    except Exception:
+        return None
 
 
 def download_resume_pdf(supabase: Client, user_id: str) -> bytes | None:
