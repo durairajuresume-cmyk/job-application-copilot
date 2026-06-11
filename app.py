@@ -129,22 +129,31 @@ if not is_logged_in():
 """,
         unsafe_allow_html=True,
     )
-    # Generate OAuth URL eagerly so the link is ready to render.
-    # target="_top" breaks out of Streamlit's inner iframe — JS redirects
-    # and meta-refresh only navigate the iframe itself, which Google blocks.
+    # Generate OAuth URL eagerly — verifier is stored in the cached Supabase client.
     oauth_url = get_google_oauth_url(supabase)
     _, btn_col, _ = st.columns([1, 2, 1])
     with btn_col:
-        st.markdown(
-            f"""<a href="{oauth_url}" target="_top"
-                   style="display:block;text-align:center;padding:0.75rem 2rem;
-                          border-radius:10px;
-                          background:linear-gradient(135deg,#6366f1,#8b5cf6);
-                          color:white;font-weight:700;font-size:1.05rem;
-                          text-decoration:none;">
+        # Render outside Streamlit's React tree so clicks aren't intercepted.
+        # Try window.top first (full tab redirect), fall back to window.parent
+        # (inner-iframe redirect), then plain href as last resort.
+        components.html(
+            f"""
+            <script>
+            function doLogin() {{
+                try {{ window.top.location.href = "{oauth_url}"; return; }} catch(e) {{}}
+                try {{ window.parent.location.href = "{oauth_url}"; return; }} catch(e) {{}}
+                window.location.href = "{oauth_url}";
+            }}
+            </script>
+            <button onclick="doLogin()" style="
+                width:100%;padding:14px 24px;border-radius:10px;
+                background:linear-gradient(135deg,#6366f1,#8b5cf6);
+                color:white;font-weight:700;font-size:16px;
+                border:none;cursor:pointer;font-family:sans-serif;">
                 Sign in with Google
-            </a>""",
-            unsafe_allow_html=True,
+            </button>
+            """,
+            height=56,
         )
     st.stop()
 
