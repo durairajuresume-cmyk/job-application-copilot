@@ -3,6 +3,7 @@ import os
 
 import anthropic
 import streamlit as st
+import streamlit.components.v1 as components
 from dotenv import load_dotenv
 
 from auth import (
@@ -132,9 +133,12 @@ if not is_logged_in():
     with btn_col:
         if st.button("Sign in with Google", use_container_width=True, type="primary"):
             oauth_url = get_google_oauth_url(supabase)
-            st.markdown(
-                f'<meta http-equiv="refresh" content="0; url={oauth_url}">',
-                unsafe_allow_html=True,
+            # Use window.top to break out of Streamlit's inner iframe before
+            # redirecting to Google — meta-refresh only navigates the iframe,
+            # which Google blocks with X-Frame-Options.
+            components.html(
+                f"<script>window.top.location.href = '{oauth_url}';</script>",
+                height=0,
             )
     st.stop()
 
