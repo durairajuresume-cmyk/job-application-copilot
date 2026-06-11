@@ -129,17 +129,23 @@ if not is_logged_in():
 """,
         unsafe_allow_html=True,
     )
+    # Generate OAuth URL eagerly so the link is ready to render.
+    # target="_top" breaks out of Streamlit's inner iframe — JS redirects
+    # and meta-refresh only navigate the iframe itself, which Google blocks.
+    oauth_url = get_google_oauth_url(supabase)
     _, btn_col, _ = st.columns([1, 2, 1])
     with btn_col:
-        if st.button("Sign in with Google", use_container_width=True, type="primary"):
-            oauth_url = get_google_oauth_url(supabase)
-            # Use window.top to break out of Streamlit's inner iframe before
-            # redirecting to Google — meta-refresh only navigates the iframe,
-            # which Google blocks with X-Frame-Options.
-            components.html(
-                f"<script>window.top.location.href = '{oauth_url}';</script>",
-                height=0,
-            )
+        st.markdown(
+            f"""<a href="{oauth_url}" target="_top"
+                   style="display:block;text-align:center;padding:0.75rem 2rem;
+                          border-radius:10px;
+                          background:linear-gradient(135deg,#6366f1,#8b5cf6);
+                          color:white;font-weight:700;font-size:1.05rem;
+                          text-decoration:none;">
+                Sign in with Google
+            </a>""",
+            unsafe_allow_html=True,
+        )
     st.stop()
 
 # ── Authenticated — load user info ───────────────────────────────────────────
