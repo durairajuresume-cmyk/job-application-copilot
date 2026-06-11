@@ -141,8 +141,7 @@ if not is_logged_in():
             <script>
             function doLogin() {{
                 try {{ window.top.location.href = "{oauth_url}"; return; }} catch(e) {{}}
-                try {{ window.parent.location.href = "{oauth_url}"; return; }} catch(e) {{}}
-                window.location.href = "{oauth_url}";
+                window.open("{oauth_url}", "_blank");
             }}
             </script>
             <button onclick="doLogin()" style="
