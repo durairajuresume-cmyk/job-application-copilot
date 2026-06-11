@@ -11,13 +11,18 @@ def save_resume(
     resume_text: str,
     resume_json: dict = None,
 ) -> None:
-    """Upload PDF to Storage and upsert the metadata row."""
+    """Upload PDF to Storage (best-effort) and upsert the metadata row."""
     path = f"{user_id}/resume.pdf"
-    supabase.storage.from_("resumes").upload(
-        path,
-        file_bytes,
-        file_options={"content-type": "application/pdf", "upsert": "true"},
-    )
+    try:
+        supabase.storage.from_("resumes").upload(
+            path,
+            file_bytes,
+            file_options={"content-type": "application/pdf", "upsert": "true"},
+        )
+    except Exception:
+        path = ""  # bucket missing or upload failed — still save the text
+
+    # Always save the text/metadata row so the resume is retrievable on next login
     supabase.table("user_resumes").upsert(
         {
             "user_id": user_id,
