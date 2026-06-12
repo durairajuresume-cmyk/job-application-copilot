@@ -331,7 +331,7 @@ if page == "Job Matcher":
         for p in postings:
             with st.expander(f"**{p.get('title') or 'Untitled'}** — {p.get('company') or 'Unknown'}"):
                 st.caption(f"Saved: {p.get('created_at', '')[:10]}")
-                st.markdown(p.get("description", "")[:600] + "…")
+                st.markdown(p.get("description", ""))
                 if st.button("Delete", key=f"del_{p['id']}"):
                     delete_job_posting(supabase, p["id"], user_id)
                     st.rerun()
