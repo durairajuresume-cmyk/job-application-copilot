@@ -20,6 +20,10 @@ from storage import (
     load_resume_meta,
     download_resume_pdf,
     save_application,
+    save_job_posting,
+    list_job_postings,
+    delete_job_posting,
+    find_matching_jobs,
 )
 from utils import (
     analyze_pdf_format,
@@ -28,8 +32,10 @@ from utils import (
     generate_cover_letter,
     generate_interview_prep,
     generate_resume_pdf,
+    rank_job_matches,
     rewrite_resume,
 )
+from rag import embed_text
 
 # ── Page config (must be first Streamlit call) ──────────────────────────────
 st.set_page_config(
@@ -51,6 +57,12 @@ if not api_key:
     st.stop()
 
 client = anthropic.Anthropic(api_key=api_key)
+
+# OpenAI key (embeddings only — generation stays on Claude)
+try:
+    openai_api_key = st.secrets["OPENAI_API_KEY"]
+except (KeyError, FileNotFoundError):
+    openai_api_key = os.getenv("OPENAI_API_KEY", "")
 
 # ── Supabase + Auth ──────────────────────────────────────────────────────────
 supabase = get_supabase()
@@ -184,9 +196,17 @@ with st.sidebar:
         st.rerun()
 
     st.markdown("---")
-    st.markdown("## How it works")
-    st.markdown(
-        """
+    page = st.radio(
+        "Navigate",
+        ["Analyze Application", "Job Matcher"],
+        label_visibility="collapsed",
+    )
+
+    st.markdown("---")
+    if page == "Analyze Application":
+        st.markdown("## How it works")
+        st.markdown(
+            """
 1. Upload your resume (PDF)
 2. Paste the job description
 3. Click **Analyze**
@@ -198,21 +218,141 @@ The app calls Claude to produce:
 - **Interview prep** with STAR answers
 - A **rewritten resume** tailored to the role (PDF download)
 """
-    )
+        )
+    else:
+        st.markdown("## Job Matcher")
+        st.markdown(
+            """
+1. **Add** job postings to your library
+2. Click **Find My Best Matches**
+
+Your resume is embedded and compared against every saved posting using vector similarity (pgvector). Claude then ranks and explains the top 10 fits.
+"""
+        )
     st.markdown("---")
     st.caption("Powered by Claude · Built with Streamlit")
 
 # ── Header ────────────────────────────────────────────────────────────────────
-st.markdown(
-    """
+if page == "Analyze Application":
+    st.markdown(
+        """
 <div class="app-header">
   <h1>Durai's Job Application Copilot</h1>
   <p>AI-powered resume analysis, cover letters, and interview coaching</p>
 </div>
 """,
-    unsafe_allow_html=True,
-)
+        unsafe_allow_html=True,
+    )
+else:
+    st.markdown(
+        """
+<div class="app-header">
+  <h1>Job Matcher</h1>
+  <p>Build your job library — find the roles that best fit your resume</p>
+</div>
+""",
+        unsafe_allow_html=True,
+    )
 st.markdown("---")
+
+# ══════════════════════════════════════════════════════════════════════════════
+# PAGE: Job Matcher
+# ══════════════════════════════════════════════════════════════════════════════
+if page == "Job Matcher":
+    if not openai_api_key:
+        st.warning(
+            "Add `OPENAI_API_KEY` to your `.streamlit/secrets.toml` (or `.env`) to enable "
+            "semantic job matching. Generation stays on Claude — this key is used only for embeddings."
+        )
+
+    # ── Add a job posting ─────────────────────────────────────────────────────
+    with st.expander("Add a job posting", expanded=True):
+        jp_title   = st.text_input("Job title", placeholder="e.g. Senior Software Engineer")
+        jp_company = st.text_input("Company",   placeholder="e.g. Acme Corp")
+        jp_desc    = st.text_area("Job description", height=220,
+                                  placeholder="Paste the full job posting here…")
+        save_posting = st.button("Save posting", type="primary",
+                                 disabled=(not jp_desc.strip() or not openai_api_key))
+        if save_posting:
+            with st.spinner("Embedding and saving…"):
+                try:
+                    emb = embed_text(jp_desc, openai_api_key)
+                    save_job_posting(supabase, user_id, jp_title, jp_company, jp_desc, emb)
+                    st.success(f"Saved: **{jp_title or 'Untitled'}** at {jp_company or 'Unknown'}")
+                    st.rerun()
+                except Exception as exc:
+                    st.error(f"Failed to save posting: {exc}")
+
+    # ── Saved postings library ────────────────────────────────────────────────
+    postings = list_job_postings(supabase, user_id)
+    st.markdown(f"### Your Job Library ({len(postings)} postings)")
+    if not postings:
+        st.info("No job postings saved yet. Add some above.")
+    else:
+        for p in postings:
+            with st.expander(f"**{p.get('title') or 'Untitled'}** — {p.get('company') or 'Unknown'}"):
+                st.caption(f"Saved: {p.get('created_at', '')[:10]}")
+                st.markdown(p.get("description", "")[:600] + "…")
+                if st.button("Delete", key=f"del_{p['id']}"):
+                    delete_job_posting(supabase, p["id"], user_id)
+                    st.rerun()
+
+    # ── Find matching jobs ────────────────────────────────────────────────────
+    st.markdown("---")
+    st.markdown("### Find My Best Matches")
+
+    saved_meta_jm = load_resume_meta(supabase, user_id)
+    resume_ready_jm = saved_meta_jm is not None
+    if not resume_ready_jm:
+        st.info("Upload and save your resume on the **Analyze Application** page first.")
+
+    match_disabled = not resume_ready_jm or not openai_api_key or len(postings) == 0
+    match_clicked  = st.button(
+        "Find My Best Matches",
+        type="primary",
+        disabled=match_disabled,
+    )
+    if match_disabled and len(postings) == 0 and resume_ready_jm:
+        st.caption("Add at least one job posting above to enable matching.")
+
+    if match_clicked:
+        with st.status("Running semantic search…", expanded=True) as jm_status:
+            try:
+                jm_status.write("Embedding your resume…")
+                resume_text_jm = saved_meta_jm["resume_text"]
+                query_emb = embed_text(resume_text_jm[:2000], openai_api_key)
+
+                jm_status.write("Searching job library by cosine similarity…")
+                matches = find_matching_jobs(supabase, user_id, query_emb, top_k=10)
+
+                if not matches:
+                    jm_status.update(label="No matches found", state="complete")
+                    st.warning("No results returned. Make sure the `match_job_postings` RPC is created in Supabase.")
+                else:
+                    jm_status.write(f"Ranking {len(matches)} matches with Claude…")
+                    ranking = rank_job_matches(client, resume_text_jm, matches)
+                    jm_status.update(label="Done!", state="complete", expanded=False)
+                    st.markdown("#### Claude's Ranking")
+                    st.markdown(ranking)
+
+                    st.markdown("---")
+                    st.markdown("#### Raw similarity scores")
+                    for i, m in enumerate(matches, 1):
+                        score_pct = int(m.get("similarity", 0) * 100)
+                        st.markdown(
+                            f"`{i}.` **{m.get('title') or 'Untitled'}** at "
+                            f"{m.get('company') or 'Unknown'} — "
+                            f"similarity {score_pct}%"
+                        )
+            except Exception as exc:
+                jm_status.update(label="Error", state="error")
+                st.error(f"Matching failed: {exc}")
+
+    st.stop()  # Don't render the Analyze Application page below
+
+# ══════════════════════════════════════════════════════════════════════════════
+# PAGE: Analyze Application
+# ══════════════════════════════════════════════════════════════════════════════
 
 # ── Resume input — saved or new upload ───────────────────────────────────────
 col_left, col_right = st.columns(2, gap="large")

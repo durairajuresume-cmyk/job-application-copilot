@@ -1,3 +1,4 @@
+import html as _html
 import io
 import json
 import re
@@ -5,7 +6,6 @@ from collections import Counter
 
 import anthropic
 import pdfplumber
-from fpdf import FPDF
 
 from prompts import (
     ANALYSIS_SYSTEM_PROMPT,
@@ -41,7 +41,7 @@ def analyze_pdf_format(uploaded_file) -> dict:
         "heading_size": 11,
         "body_size": 10,
         "contact_size": 9,
-        "heading_rgb": None,  # None → fall back to dark gray
+        "heading_rgb": None,  # None -> fall back to dark gray
     }
     try:
         if hasattr(uploaded_file, "seek"):
@@ -53,7 +53,7 @@ def analyze_pdf_format(uploaded_file) -> dict:
             if not chars:
                 return fmt
 
-            # ── Font sizes ────────────────────────────────────────────────
+            # Font sizes
             sizes = [round(float(c["size"])) for c in chars]
             cnt = Counter(sizes)
             body = cnt.most_common(1)[0][0]
@@ -68,11 +68,11 @@ def analyze_pdf_format(uploaded_file) -> dict:
             if fmt["heading_size"] <= fmt["body_size"]:
                 fmt["heading_size"] = fmt["body_size"] + 1
 
-            # ── Accent color ──────────────────────────────────────────────
+            # Accent color
             for char in chars:
                 raw = char.get("non_stroking_color")
                 if raw is None or isinstance(raw, (int, float)):
-                    continue  # grayscale — not an accent
+                    continue  # grayscale -- not an accent
                 if isinstance(raw, (list, tuple)) and len(raw) == 3:
                     r, g, b = float(raw[0]), float(raw[1]), float(raw[2])
                     # pdfplumber returns 0-1 floats
@@ -146,175 +146,205 @@ def rewrite_resume(client: anthropic.Anthropic, resume_text: str, job_descriptio
     return json.loads(json_match.group())
 
 
+def rank_job_matches(client: anthropic.Anthropic, resume_text: str, postings: list) -> str:
+    """Ask Claude to rank retrieved job postings by fit and explain each."""
+    postings_block = "\n\n".join(
+        f"[{i + 1}] {p.get('title', 'Untitled')} at {p.get('company', 'Unknown')}"
+        f" (similarity: {p.get('similarity', 0):.2f})\n"
+        f"{p.get('description', '')[:500]}..."
+        for i, p in enumerate(postings)
+    )
+    prompt = (
+        f"Here is the candidate's resume (first 2000 characters):\n"
+        f"<resume>\n{resume_text[:2000]}\n</resume>\n\n"
+        f"These {len(postings)} job postings were retrieved by semantic similarity "
+        f"to the resume:\n\n{postings_block}\n\n"
+        f"Rank them from best to worst fit. For each posting provide:\n"
+        f"1. Rank and job title\n"
+        f"2. Why it is a strong or weak fit (2 sentences)\n"
+        f"3. One concrete tip to strengthen the application\n\n"
+        f"Return a clean numbered list."
+    )
+    return _call_claude(client, "You are an expert career coach.", prompt, max_tokens=2000)
+
+
 def _safe(text: str) -> str:
-    """Map common Unicode chars to Latin-1 equivalents for fpdf2 core fonts."""
+    """Normalize common Unicode punctuation so text is safe for ReportLab core fonts."""
     if not text:
         return ""
-    text = text.translate(str.maketrans({
-        '–': '-',    # en dash
-        '—': '-',    # em dash
-        '‘': "'",    # left single quote
-        '’': "'",    # right single quote / apostrophe
-        '“': '"',    # left double quote
-        '”': '"',    # right double quote
-        '•': '-',    # bullet
-        '…': '...',  # ellipsis
-        ' ': ' ',    # non-breaking space
-        '­': '',     # soft hyphen
-    }))
-    return text.encode('latin-1', errors='replace').decode('latin-1')
+    # Replace smart quotes, dashes, bullets, etc. with plain ASCII equivalents
+    replacements = {
+        0x2013: "-",   # en dash
+        0x2014: "-",   # em dash
+        0x2018: "'",   # left single quote
+        0x2019: "'",   # right single quote / apostrophe
+        0x201C: '"',   # left double quote
+        0x201D: '"',   # right double quote
+        0x2022: "-",   # bullet
+        0x2026: "...", # ellipsis
+        0x00A0: " ",   # non-breaking space
+        0x00AD: "",    # soft hyphen
+    }
+    return str(text).translate(replacements)
 
 
 def generate_resume_pdf(data: dict, fmt: dict | None = None) -> bytes:
-    """Render structured resume data matching the style hints in fmt."""
+    """Render structured resume JSON into a style-faithful PDF using ReportLab.
+
+    ReportLab's Paragraph/Platypus flowable model handles text reflow, true
+    hanging indents, and automatic page breaks -- no manual cursor arithmetic.
+    The extracted format hints (font sizes, accent color) from the user's
+    original PDF are applied via ParagraphStyle so any uploaded resume style
+    is faithfully reflected in the output.
+    """
+    from reportlab.lib.colors import Color
+    from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY, TA_LEFT
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.lib.units import mm
+    from reportlab.platypus import HRFlowable, Paragraph, SimpleDocTemplate, Spacer
 
     if fmt is None:
         fmt = {}
 
-    # Clamp sizes to sane ranges
-    name_sz = max(14, min(int(fmt.get("name_size", 20)), 30))
-    head_sz = max(9, min(int(fmt.get("heading_size", 11)), 18))
-    body_sz = max(8, min(int(fmt.get("body_size", 10)), 14))
-    cont_sz = max(7, min(int(fmt.get("contact_size", 9)), 12))
-    head_rgb = fmt.get("heading_rgb") or (30, 30, 30)
+    # Clamp extracted sizes to sane ranges
+    name_sz = max(14, min(int(fmt.get("name_size",    20)), 30))
+    head_sz = max( 9, min(int(fmt.get("heading_size", 11)), 18))
+    body_sz = max( 8, min(int(fmt.get("body_size",    10)), 14))
+    cont_sz = max( 7, min(int(fmt.get("contact_size",  9)), 12))
+    r, g, b = fmt.get("heading_rgb") or (30, 30, 30)
 
-    # A4 page (210mm), margins left=20 top=18 right=20 → content width = 170mm.
-    # Use explicit widths everywhere — w=0 in multi_cell is unreliable in newer
-    # fpdf2 when the cursor has been moved right by a preceding cell() call.
-    FULL_W = 170
-    INDENT = 6          # dash cell width before each bullet
-    BULL_W = FULL_W - INDENT
-    line_h = max(5, int(body_sz * 0.5))
+    accent   = Color(r / 255, g / 255, b / 255)
+    dark     = Color(0.08, 0.08, 0.08)
+    body_clr = Color(0.25, 0.25, 0.25)
+    muted    = Color(0.40, 0.40, 0.40)
 
-    class _PDF(FPDF):
-        def header(self): pass
-        def footer(self): pass
+    CONTENT_W   = 170 * mm
+    BULLET_HANG = 5   * mm  # dash overhangs; wrapped lines align with text start
 
-    def _section_heading(pdf: FPDF, title: str):
-        pdf.set_font("Helvetica", "B", head_sz)
-        pdf.set_text_color(*head_rgb)
-        pdf.cell(FULL_W, 7, _safe(title.upper()), ln=True)
-        pdf.set_draw_color(*head_rgb)
-        pdf.set_line_width(0.3)
-        pdf.line(pdf.get_x(), pdf.get_y(), pdf.get_x() + FULL_W, pdf.get_y())
-        pdf.set_text_color(40, 40, 40)
-        pdf.ln(2)
+    def ps(name, **kw):
+        return ParagraphStyle(name, **kw)
 
-    pdf = _PDF()
-    pdf.set_margins(20, 18, 20)
-    pdf.add_page()
-    pdf.set_auto_page_break(auto=True, margin=18)
+    name_sty = ps("nm",
+        fontName="Helvetica-Bold", fontSize=name_sz, leading=name_sz * 1.2,
+        textColor=dark, alignment=TA_CENTER, spaceAfter=1 * mm)
+    contact_sty = ps("ct",
+        fontName="Helvetica", fontSize=cont_sz, leading=cont_sz * 1.4,
+        textColor=muted, alignment=TA_CENTER, spaceAfter=4 * mm)
+    sec_sty = ps("sec",
+        fontName="Helvetica-Bold", fontSize=head_sz, leading=head_sz * 1.4,
+        textColor=accent, alignment=TA_LEFT, spaceBefore=3 * mm, spaceAfter=1 * mm)
+    job_title_sty = ps("jt",
+        fontName="Helvetica-Bold", fontSize=body_sz, leading=body_sz * 1.4,
+        textColor=dark, alignment=TA_LEFT, spaceBefore=2 * mm, spaceAfter=0.5 * mm)
+    duration_sty = ps("du",
+        fontName="Helvetica-Oblique", fontSize=cont_sz, leading=cont_sz * 1.4,
+        textColor=muted, alignment=TA_LEFT, spaceAfter=1 * mm)
+    body_sty = ps("bd",
+        fontName="Helvetica", fontSize=body_sz, leading=body_sz * 1.4,
+        textColor=body_clr, alignment=TA_JUSTIFY, spaceAfter=3 * mm)
+    # True hanging indent: "- " prefix sits at the left edge; continuation
+    # lines wrap flush with the text start (firstLineIndent pulls first line left).
+    bullet_sty = ps("bu",
+        fontName="Helvetica", fontSize=body_sz, leading=body_sz * 1.4,
+        textColor=body_clr, alignment=TA_JUSTIFY,
+        leftIndent=BULLET_HANG, firstLineIndent=-BULLET_HANG,
+        spaceAfter=1 * mm)
+    skills_sty = ps("sk",
+        fontName="Helvetica", fontSize=body_sz, leading=body_sz * 1.5,
+        textColor=body_clr, alignment=TA_LEFT, spaceAfter=3 * mm)
+    edu_deg_sty = ps("ed",
+        fontName="Helvetica-Bold", fontSize=body_sz, leading=body_sz * 1.4,
+        textColor=dark, spaceBefore=1 * mm, spaceAfter=0.5 * mm)
+    edu_info_sty = ps("ei",
+        fontName="Helvetica", fontSize=body_sz, leading=body_sz * 1.4,
+        textColor=muted, spaceAfter=2 * mm)
 
-    # Name
-    pdf.set_font("Helvetica", "B", name_sz)
-    pdf.set_text_color(15, 15, 15)
-    pdf.cell(FULL_W, 10, _safe(data.get("name", "")), ln=True, align="C")
+    story = []
 
-    # Contact
-    pdf.set_font("Helvetica", "", cont_sz)
-    pdf.set_text_color(80, 80, 80)
-    pdf.cell(FULL_W, 5, _safe(data.get("contact", "")), ln=True, align="C")
-    pdf.ln(5)
+    def section(title):
+        story.append(Paragraph(title, sec_sty))
+        story.append(HRFlowable(
+            width=CONTENT_W, thickness=0.4, color=accent, spaceAfter=2 * mm))
+
+    def t(text):
+        """Normalize + HTML-escape text so Paragraph markup won't misfire on user content."""
+        return _html.escape(_safe(str(text) if text else ""))
+
+    def add_bullet(text):
+        escaped = t(text)
+        if escaped:
+            story.append(Paragraph(f"- {escaped}", bullet_sty))
+
+    # Name & contact
+    story.append(Paragraph(t(data.get("name", "")), name_sty))
+    if data.get("contact"):
+        story.append(Paragraph(t(data["contact"]), contact_sty))
 
     # Summary
     if data.get("summary"):
-        _section_heading(pdf, "Professional Summary")
-        pdf.set_font("Helvetica", "", body_sz)
-        pdf.set_text_color(40, 40, 40)
-        pdf.multi_cell(FULL_W, line_h, _safe(data["summary"]))
-        pdf.ln(4)
+        section("PROFESSIONAL SUMMARY")
+        story.append(Paragraph(t(data["summary"]), body_sty))
 
     # Experience
     if data.get("experience"):
-        _section_heading(pdf, "Experience")
+        section("EXPERIENCE")
         for exp in data["experience"]:
-            pdf.set_font("Helvetica", "B", body_sz)
-            pdf.set_text_color(20, 20, 20)
-            title_line = exp.get("title", "")
-            company = exp.get("company", "")
-            if company:
-                title_line += f"  -  {company}"
-            pdf.cell(FULL_W, line_h + 1, _safe(title_line), ln=True)
-
-            pdf.set_font("Helvetica", "I", cont_sz)
-            pdf.set_text_color(100, 100, 100)
-            pdf.cell(FULL_W, line_h, _safe(exp.get("duration", "")), ln=True)
-
-            pdf.set_font("Helvetica", "", body_sz)
-            pdf.set_text_color(40, 40, 40)
-            for bullet in exp.get("bullets", []):
-                text = _safe(bullet.strip())
-                if not text:
-                    continue
-                pdf.cell(INDENT, line_h, "-", ln=False)
-                pdf.multi_cell(BULL_W, line_h, text)
-            pdf.ln(3)
+            title   = t(exp.get("title",   ""))
+            company = t(exp.get("company", ""))
+            header  = f"{title}  -  {company}" if company else title
+            story.append(Paragraph(header, job_title_sty))
+            if exp.get("duration"):
+                story.append(Paragraph(t(exp["duration"]), duration_sty))
+            for b in exp.get("bullets", []):
+                add_bullet(b.strip())
+            story.append(Spacer(1, 2 * mm))
 
     # Skills
     if data.get("skills"):
-        _section_heading(pdf, "Skills")
-        pdf.set_font("Helvetica", "", body_sz)
-        pdf.set_text_color(40, 40, 40)
-        skills_text = "  -  ".join(_safe(s) for s in data["skills"] if s)
-        pdf.multi_cell(FULL_W, line_h, skills_text)
-        pdf.ln(4)
+        section("SKILLS")
+        skills_line = "  |  ".join(t(sk) for sk in data["skills"] if sk)
+        story.append(Paragraph(skills_line, skills_sty))
 
     # Education
     if data.get("education"):
-        _section_heading(pdf, "Education")
+        section("EDUCATION")
         for edu in data["education"]:
-            pdf.set_font("Helvetica", "B", body_sz)
-            pdf.set_text_color(20, 20, 20)
-            pdf.cell(FULL_W, line_h + 1, _safe(edu.get("degree", "")), ln=True)
-            pdf.set_font("Helvetica", "", body_sz)
-            pdf.set_text_color(60, 60, 60)
-            inst = _safe(edu.get("institution", ""))
-            year = _safe(edu.get("year", ""))
-            pdf.cell(FULL_W, line_h, f"{inst}  {year}".strip(), ln=True)
-            pdf.ln(2)
+            story.append(Paragraph(t(edu.get("degree", "")), edu_deg_sty))
+            inst = t(edu.get("institution", ""))
+            year = t(edu.get("year", ""))
+            if inst or year:
+                story.append(Paragraph(f"{inst}  {year}".strip(), edu_info_sty))
 
-    # Projects (optional — rendered if AI includes them)
+    # Projects
     if data.get("projects"):
-        _section_heading(pdf, "Projects")
+        section("PROJECTS")
         for proj in data["projects"]:
-            pdf.set_font("Helvetica", "B", body_sz)
-            pdf.set_text_color(20, 20, 20)
-            title = _safe(proj.get("title", ""))
-            tech = _safe(proj.get("tech", ""))
+            title  = t(proj.get("title", ""))
+            tech   = t(proj.get("tech",  ""))
             header = f"{title}  -  {tech}" if tech else title
-            pdf.cell(FULL_W, line_h + 1, header, ln=True)
-            pdf.set_font("Helvetica", "", body_sz)
-            pdf.set_text_color(40, 40, 40)
-            for bullet in proj.get("bullets", []):
-                text = _safe(bullet.strip())
-                if not text:
-                    continue
-                pdf.cell(INDENT, line_h, "-", ln=False)
-                pdf.multi_cell(BULL_W, line_h, text)
-            pdf.ln(3)
+            story.append(Paragraph(header, job_title_sty))
+            for b in proj.get("bullets", []):
+                add_bullet(b.strip())
+            story.append(Spacer(1, 2 * mm))
 
-    # Certifications (optional)
+    # Certifications
     if data.get("certifications"):
-        _section_heading(pdf, "Certifications")
-        pdf.set_font("Helvetica", "", body_sz)
-        pdf.set_text_color(40, 40, 40)
+        section("CERTIFICATIONS")
         for cert in data["certifications"]:
-            text = _safe(str(cert).strip())
-            if text:
-                pdf.cell(INDENT, line_h, "-", ln=False)
-                pdf.multi_cell(BULL_W, line_h, text)
-        pdf.ln(2)
+            add_bullet(str(cert).strip())
 
-    # Awards (optional)
+    # Awards
     if data.get("awards"):
-        _section_heading(pdf, "Awards & Recognition")
-        pdf.set_font("Helvetica", "", body_sz)
-        pdf.set_text_color(40, 40, 40)
+        section("AWARDS & RECOGNITION")
         for award in data["awards"]:
-            text = _safe(str(award).strip())
-            if text:
-                pdf.cell(INDENT, line_h, "-", ln=False)
-                pdf.multi_cell(BULL_W, line_h, text)
-        pdf.ln(2)
+            add_bullet(str(award).strip())
 
-    return bytes(pdf.output())
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buf, pagesize=A4,
+        leftMargin=20 * mm, rightMargin=20 * mm,
+        topMargin=18 * mm, bottomMargin=18 * mm,
+    )
+    doc.build(story)
+    return buf.getvalue()

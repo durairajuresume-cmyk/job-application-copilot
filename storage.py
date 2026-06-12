@@ -76,3 +76,52 @@ def list_applications(supabase: Client, user_id: str) -> list:
         .execute()
     )
     return resp.data or []
+
+
+# ── Job postings (RAG corpus) ─────────────────────────────────────────────────
+
+def save_job_posting(
+    supabase: Client,
+    user_id: str,
+    title: str,
+    company: str,
+    description: str,
+    embedding: list,
+) -> None:
+    supabase.table("job_postings").insert({
+        "user_id": user_id,
+        "title": title or "",
+        "company": company or "",
+        "description": description,
+        "embedding": embedding,
+    }).execute()
+
+
+def list_job_postings(supabase: Client, user_id: str) -> list:
+    resp = (
+        supabase.table("job_postings")
+        .select("id, title, company, description, created_at")
+        .eq("user_id", user_id)
+        .order("created_at", desc=True)
+        .execute()
+    )
+    return resp.data or []
+
+
+def delete_job_posting(supabase: Client, posting_id: str, user_id: str) -> None:
+    supabase.table("job_postings").delete().eq("id", posting_id).eq("user_id", user_id).execute()
+
+
+def find_matching_jobs(
+    supabase: Client,
+    user_id: str,
+    query_embedding: list,
+    top_k: int = 10,
+) -> list:
+    """Run pgvector cosine similarity search via the match_job_postings RPC."""
+    resp = supabase.rpc("match_job_postings", {
+        "query_embedding": query_embedding,
+        "match_user_id": user_id,
+        "match_count": top_k,
+    }).execute()
+    return resp.data or []
