@@ -29,6 +29,7 @@ from utils import (
     analyze_pdf_format,
     analyze_resume,
     extract_text_from_pdf,
+    fetch_job_from_url,
     generate_cover_letter,
     generate_interview_prep,
     generate_resume_pdf,
@@ -265,9 +266,45 @@ if page == "Job Matcher":
             "semantic job matching. Generation stays on Claude — this key is used only for embeddings."
         )
 
-    # ── Add a job posting ─────────────────────────────────────────────────────
-    with st.expander("Add a job posting", expanded=True):
-        jp_title   = st.text_input("Job title", placeholder="e.g. Senior Software Engineer")
+    # ── Import from URL ───────────────────────────────────────────────────────
+    st.markdown("### Add Job Postings")
+    url_tab, manual_tab = st.tabs(["Import from URL", "Paste manually"])
+
+    with url_tab:
+        st.caption("Paste any job URL — Indeed, Glassdoor, company careers page, etc.")
+        job_url = st.text_input("Job posting URL", placeholder="https://www.indeed.com/viewjob?jk=...")
+        fetch_clicked = st.button(
+            "Fetch & Save",
+            type="primary",
+            disabled=(not job_url.strip() or not openai_api_key),
+            key="fetch_url",
+        )
+        if fetch_clicked:
+            with st.spinner("Fetching page and extracting job details…"):
+                try:
+                    job_data = fetch_job_from_url(client, job_url.strip())
+                    if not job_data.get("description"):
+                        st.error("Could not extract a job description from that page. The site may require a login (e.g. LinkedIn). Try copying the URL from Indeed, Glassdoor, or a company careers page.")
+                    else:
+                        emb = embed_text(job_data["description"], openai_api_key)
+                        save_job_posting(
+                            supabase, user_id,
+                            job_data.get("title", ""),
+                            job_data.get("company", ""),
+                            job_data["description"],
+                            emb,
+                        )
+                        st.success(
+                            f"Saved: **{job_data.get('title', 'Untitled')}** "
+                            f"at {job_data.get('company', 'Unknown')}"
+                        )
+                        st.rerun()
+                except Exception as exc:
+                    st.error(f"Failed to fetch URL: {exc}")
+
+    with manual_tab:
+        st.caption("Copy-paste the full job description below.")
+        jp_title   = st.text_input("Job title", placeholder="e.g. Senior Product Manager")
         jp_company = st.text_input("Company",   placeholder="e.g. Acme Corp")
         jp_desc    = st.text_area("Job description", height=220,
                                   placeholder="Paste the full job posting here…")

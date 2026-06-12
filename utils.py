@@ -146,6 +146,48 @@ def rewrite_resume(client: anthropic.Anthropic, resume_text: str, job_descriptio
     return json.loads(json_match.group())
 
 
+def fetch_job_from_url(client: anthropic.Anthropic, url: str) -> dict:
+    """Fetch a job posting URL, strip HTML, use Claude to extract title/company/description."""
+    import requests
+    from bs4 import BeautifulSoup
+
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/120.0.0.0 Safari/537.36"
+        )
+    }
+    resp = requests.get(url, headers=headers, timeout=15)
+    resp.raise_for_status()
+
+    soup = BeautifulSoup(resp.text, "html.parser")
+    for tag in soup(["script", "style", "nav", "header", "footer", "aside", "iframe"]):
+        tag.decompose()
+    raw_text = soup.get_text(separator="\n", strip=True)[:8000]
+
+    prompt = (
+        "Extract the job posting from this webpage text and return a JSON object with "
+        "exactly three fields:\n"
+        '- "title": the job title\n'
+        '- "company": the company name\n'
+        '- "description": the full job description (responsibilities, requirements, '
+        "qualifications — keep it complete)\n\n"
+        f"<webpage_text>\n{raw_text}\n</webpage_text>\n\n"
+        "Return only the JSON object, no markdown, no extra text."
+    )
+    raw = _call_claude(
+        client,
+        "You extract structured job posting data from webpage text. Return only valid JSON.",
+        prompt,
+        max_tokens=2000,
+    )
+    json_match = re.search(r"\{.*\}", raw, re.DOTALL)
+    if not json_match:
+        raise ValueError("Could not parse job data from this page.")
+    return json.loads(json_match.group())
+
+
 def rank_job_matches(client: anthropic.Anthropic, resume_text: str, postings: list) -> str:
     """Ask Claude to rank retrieved job postings by fit and explain each."""
     postings_block = "\n\n".join(
