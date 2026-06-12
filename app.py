@@ -295,6 +295,7 @@ if page == "Job Matcher":
                             job_data.get("company", ""),
                             job_data["description"],
                             emb,
+                            location=job_data.get("location", ""),
                         )
                         st.success(
                             f"Saved: **{job_data.get('title', 'Untitled')}** "
@@ -306,35 +307,46 @@ if page == "Job Matcher":
 
     with manual_tab:
         st.caption("Copy-paste the full job description below.")
-        jp_title   = st.text_input("Job title", placeholder="e.g. Senior Product Manager")
-        jp_company = st.text_input("Company",   placeholder="e.g. Acme Corp")
-        jp_desc    = st.text_area("Job description", height=220,
-                                  placeholder="Paste the full job posting here…")
+        jp_title    = st.text_input("Job title",  placeholder="e.g. Senior Product Manager")
+        jp_company  = st.text_input("Company",    placeholder="e.g. Acme Corp")
+        jp_location = st.text_input("Location",   placeholder="e.g. Bangalore, India or Remote")
+        jp_desc     = st.text_area("Job description", height=220,
+                                   placeholder="Paste the full job posting here…")
         save_posting = st.button("Save posting", type="primary",
                                  disabled=(not jp_desc.strip() or not openai_api_key))
         if save_posting:
             with st.spinner("Embedding and saving…"):
                 try:
                     emb = embed_text(jp_desc, openai_api_key)
-                    save_job_posting(supabase, user_id, jp_title, jp_company, jp_desc, emb)
+                    save_job_posting(supabase, user_id, jp_title, jp_company, jp_desc, emb,
+                                     location=jp_location)
                     st.success(f"Saved: **{jp_title or 'Untitled'}** at {jp_company or 'Unknown'}")
                     st.rerun()
                 except Exception as exc:
                     st.error(f"Failed to save posting: {exc}")
 
-    # ── Saved postings library ────────────────────────────────────────────────
-    postings = list_job_postings(supabase, user_id)
-    st.markdown(f"### Your Job Library ({len(postings)} postings)")
+    # ── Shared job directory ──────────────────────────────────────────────────
+    postings = list_job_postings(supabase)
+    st.markdown(f"### Job Directory ({len(postings)} postings from all users)")
     if not postings:
-        st.info("No job postings saved yet. Add some above.")
+        st.info("No job postings yet. Be the first to add one above.")
     else:
         for p in postings:
-            with st.expander(f"**{p.get('title') or 'Untitled'}** — {p.get('company') or 'Unknown'}"):
-                st.caption(f"Saved: {p.get('created_at', '')[:10]}")
+            loc = p.get("location") or ""
+            label = f"**{p.get('title') or 'Untitled'}** — {p.get('company') or 'Unknown'}"
+            if loc:
+                label += f" · {loc}"
+            with st.expander(label):
+                col_meta, col_del = st.columns([4, 1])
+                with col_meta:
+                    st.caption(f"Added: {p.get('created_at', '')[:10]}"
+                               + (" · by you" if p.get("user_id") == user_id else ""))
+                with col_del:
+                    if p.get("user_id") == user_id:
+                        if st.button("Delete", key=f"del_{p['id']}"):
+                            delete_job_posting(supabase, p["id"], user_id)
+                            st.rerun()
                 st.markdown(p.get("description", ""))
-                if st.button("Delete", key=f"del_{p['id']}"):
-                    delete_job_posting(supabase, p["id"], user_id)
-                    st.rerun()
 
     # ── Find matching jobs ────────────────────────────────────────────────────
     st.markdown("---")
@@ -361,8 +373,8 @@ if page == "Job Matcher":
                 resume_text_jm = saved_meta_jm["resume_text"]
                 query_emb = embed_text(resume_text_jm[:2000], openai_api_key)
 
-                jm_status.write("Searching job library by cosine similarity…")
-                matches = find_matching_jobs(supabase, user_id, query_emb, top_k=10)
+                jm_status.write("Searching job directory by cosine similarity…")
+                matches = find_matching_jobs(supabase, query_emb, top_k=10)
 
                 if not matches:
                     jm_status.update(label="No matches found", state="complete")
@@ -378,9 +390,10 @@ if page == "Job Matcher":
                     st.markdown("#### Raw similarity scores")
                     for i, m in enumerate(matches, 1):
                         score_pct = int(m.get("similarity", 0) * 100)
+                        loc = f" · {m['location']}" if m.get("location") else ""
                         st.markdown(
                             f"`{i}.` **{m.get('title') or 'Untitled'}** at "
-                            f"{m.get('company') or 'Unknown'} — "
+                            f"{m.get('company') or 'Unknown'}{loc} — "
                             f"similarity {score_pct}%"
                         )
             except Exception as exc:

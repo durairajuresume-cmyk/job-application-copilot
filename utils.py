@@ -168,9 +168,10 @@ def fetch_job_from_url(client: anthropic.Anthropic, url: str) -> dict:
 
     prompt = (
         "Extract the job posting from this webpage text and return a JSON object with "
-        "exactly three fields:\n"
+        "exactly four fields:\n"
         '- "title": the job title\n'
         '- "company": the company name\n'
+        '- "location": the job location (city, state, country, or "Remote" — empty string if not found)\n'
         '- "description": the full job description (responsibilities, requirements, '
         "qualifications — keep it complete)\n\n"
         f"<webpage_text>\n{raw_text}\n</webpage_text>\n\n"

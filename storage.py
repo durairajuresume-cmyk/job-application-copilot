@@ -87,21 +87,23 @@ def save_job_posting(
     company: str,
     description: str,
     embedding: list,
+    location: str = "",
 ) -> None:
     supabase.table("job_postings").insert({
         "user_id": user_id,
         "title": title or "",
         "company": company or "",
+        "location": location or "",
         "description": description,
         "embedding": embedding,
     }).execute()
 
 
-def list_job_postings(supabase: Client, user_id: str) -> list:
+def list_job_postings(supabase: Client) -> list:
+    """Return all postings from all users — shared job directory."""
     resp = (
         supabase.table("job_postings")
-        .select("id, title, company, description, created_at")
-        .eq("user_id", user_id)
+        .select("id, user_id, title, company, location, description, created_at")
         .order("created_at", desc=True)
         .execute()
     )
@@ -114,14 +116,13 @@ def delete_job_posting(supabase: Client, posting_id: str, user_id: str) -> None:
 
 def find_matching_jobs(
     supabase: Client,
-    user_id: str,
     query_embedding: list,
     top_k: int = 10,
 ) -> list:
-    """Run pgvector cosine similarity search via the match_job_postings RPC."""
+    """Cosine similarity search across ALL postings in the shared directory."""
     resp = supabase.rpc("match_job_postings", {
         "query_embedding": query_embedding,
-        "match_user_id": user_id,
+        "match_user_id": "00000000-0000-0000-0000-000000000000",  # unused, kept for RPC signature
         "match_count": top_k,
     }).execute()
     return resp.data or []
