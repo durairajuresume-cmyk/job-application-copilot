@@ -70,8 +70,10 @@ supabase = get_supabase()
 
 # Handle OAuth callback (?code= param arrives after Google redirect)
 if st.query_params.get("code"):
-    handle_oauth_callback(supabase)
-    st.rerun()
+    success = handle_oauth_callback(supabase)
+    if success:
+        st.rerun()
+    # On failure: don't rerun — let the error message from handle_oauth_callback stay visible
 
 # Restore / refresh session on every render.
 # Always calling this keeps the shared Supabase client's auth state current —
